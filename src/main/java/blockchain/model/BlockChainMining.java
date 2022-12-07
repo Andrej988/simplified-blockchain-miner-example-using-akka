@@ -9,9 +9,6 @@ import lombok.extern.slf4j.Slf4j;
 @Slf4j
 public class BlockChainMining {
     @Getter
-    private long startTime;
-
-    @Getter
     private int numberOfBlocksToMine;
 
     private long workloadPerWorker;
@@ -19,6 +16,7 @@ public class BlockChainMining {
     @Getter
     private int difficulty;
 
+    @Getter
     private BlockChain blockchain;
 
     @Getter

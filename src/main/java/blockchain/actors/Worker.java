@@ -33,7 +33,7 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 
 	@AllArgsConstructor
 	@Getter
-	private static class MineCommand implements Command {
+	public static class MineCommand implements Command {
 		private long iteration;
 		private long startNonce;
 		private long endNonce;
@@ -46,6 +46,8 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 		private ActorRef<Manager.Command> controller;
 	}
 
+	public static class BlockAlreadyMinedAbortCurrentWorkCommand implements Command {}
+
 	public static class DecommissionWorkerCommand implements Command {}
 
 	private Worker(ActorContext<Command> context) {
@@ -57,6 +59,7 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 	}
 
 	private static final long ITERATION_SIZE = 10;
+	private boolean abortCommandReceived = false;
 
 	@Override
 	public Receive<Command> createReceive() {
@@ -67,6 +70,7 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 		return newReceiveBuilder()
 				.onMessage(StartMiningCommand.class, message -> {
 					System.out.println(getContext().getSelf().path() + " received start command for nonce from " + message.getStartNonce() + " to " + message.getEndNonce() + ".");
+					abortCommandReceived = false;
 					long endNonce = Math.min((message.getStartNonce() + ITERATION_SIZE -1), message.getEndNonce());
 					getContext().getSelf().tell(new MineCommand(0, message.getStartNonce(), endNonce, message.getController()));
 					return workerMiningMessageHandler(message.getBlock(), message.getDifficulty(), message.getStartNonce(), message.getEndNonce(), 0);
@@ -78,6 +82,11 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 	private Receive<Command> workerMiningMessageHandler(Block block, int difficulty, long startNonce, long endNonce, long processed) {
 		return newReceiveBuilder()
 				.onMessage(MineCommand.class, message -> {
+					if(abortCommandReceived) {
+						message.getController().tell(new Manager.WorkerFinishedCommand(getContext().getSelf(), block, Optional.empty()));
+						return workerIdleMessageHandler();
+					}
+
 					Optional<HashResult> hashResult = BlockChainUtils.mineBlock(block, difficulty, message.getStartNonce(), message.getEndNonce());
 
 					if(hashResult.isPresent()) {
@@ -96,6 +105,10 @@ public class Worker extends AbstractBehavior<Worker.Command> {
 						long currentlyProcessed = processed + (message.getEndNonce() - message.getStartNonce() + 1);
 						return workerMiningMessageHandler(block, difficulty, startNonce, endNonce, currentlyProcessed);
 					}
+				})
+				.onMessage(BlockAlreadyMinedAbortCurrentWorkCommand.class, message -> {
+					this.abortCommandReceived = true;
+					return Behaviors.same();
 				})
 				.onMessage(ProgressReportCommand.class, message -> {
 					long totalWorkload = (endNonce - startNonce) +1;

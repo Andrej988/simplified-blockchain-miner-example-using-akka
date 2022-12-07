@@ -25,6 +25,7 @@ public class Manager extends AbstractBehavior<Manager.Command> {
     @Getter
     public static class StartCommand implements Command {
         private BlockChainMiningWorkOrder workOrder;
+        private ActorRef<BlockChain> sender;
     }
 
     private static class MineNextBlockCommand implements Command {}
@@ -65,12 +66,13 @@ public class Manager extends AbstractBehavior<Manager.Command> {
     }
 
     private Object TIMER_KEY;
+    private ActorRef<BlockChain> sender;
 
     private Receive<Command> miningNotYetStartedMessageHandler() {
         return newReceiveBuilder()
                 .onMessage(StartCommand.class, message -> {
+                    this.sender = message.getSender();
                     BlockChainMining mining = BlockChainMining.builder()
-                            .startTime(System.currentTimeMillis())
                             .blockchain(new BlockChain())
                             .numberOfBlocksToMine(message.getWorkOrder().getNumberOfBlocksToMine())
                             .workloadPerWorker(message.getWorkOrder().getWorkloadPerWorker())
@@ -97,6 +99,8 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                         getContext().getSelf().tell(new MiningFinishedCommand());
                         return miningFinishedMessageHandler(mining, workers);
                     }
+
+                    workers.keySet().forEach(worker -> worker.tell(new Worker.BlockAlreadyMinedAbortCurrentWorkCommand()));
 
                     mining.setCurrentBlock(Block.generateNewBlockWithRandomData(mining.getHashOfPreviousBlock()));
                     mining.setNextStartNonce(0);
@@ -129,6 +133,7 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                     workers.put(message.getWorker(), WorkerStatus.IDLE);
 
                     if(mining.isActualBlock(message.getBlock()) && message.getResult().isPresent()) {
+                        System.out.println("Worker " + message.getWorker().path() + " successfully mined block number " + (mining.getBlockChainSize() +1) + " with hash: " + message.getResult().get().getHash());
                         mining.addCurrentBlockToBlockChain(message.getResult().get());
                         mining.setAssignNewBlock(true);
                         getContext().getSelf().tell(new MineNextBlockCommand());
@@ -145,9 +150,8 @@ public class Manager extends AbstractBehavior<Manager.Command> {
         return newReceiveBuilder()
                 .onMessage(MiningFinishedCommand.class, message -> {
                     workers.keySet().forEach(worker -> worker.tell(new Worker.DecommissionWorkerCommand()));
-                    mining.printAndValidateBlockChain();
-                    long endTime = System.currentTimeMillis();
-                    System.out.println("Elapsed time: " + (endTime - mining.getStartTime()) + " ms.");
+                    this.sender.tell(mining.getBlockchain());
+
                     return Behaviors.withTimers(timers -> {
                         timers.cancelAll();
                         return Behaviors.stopped();
