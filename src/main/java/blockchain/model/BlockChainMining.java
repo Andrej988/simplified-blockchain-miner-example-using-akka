@@ -1,18 +1,9 @@
 package blockchain.model;
 
-import akka.actor.typed.ActorRef;
-import blockchain.actors.Worker;
-import blockchain.actors.WorkerStatus;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
-
-import java.util.HashMap;
-import java.util.HashSet;
-import java.util.Map;
-import java.util.Set;
-import java.util.stream.Collectors;
 
 @Builder
 @Slf4j
@@ -33,7 +24,6 @@ public class BlockChainMining {
     @Getter
     @Setter
     private Block currentBlock;
-    private Map<ActorRef<Worker.Command>, WorkerStatus> workers;
 
     @Getter
     @Setter
@@ -49,33 +39,6 @@ public class BlockChainMining {
 
     public String getHashOfPreviousBlock() {
         return blockchain.getSize() > 0 ? blockchain.getLastHash() : "0";
-    }
-
-    public void initWorkers(Set<ActorRef<Worker.Command>> workersSet) {
-        if(workers == null) {
-            workers = new HashMap<>();
-        }
-        workersSet.forEach(worker -> this.workers.put(worker, WorkerStatus.IDLE));
-    }
-
-    public void setWorkerStatus(ActorRef<Worker.Command> worker, WorkerStatus status) {
-        workers.put(worker, status);
-    }
-
-    public WorkerStatus getWorkerStatus(ActorRef<Worker.Command> worker) {
-        return workers.get(worker);
-    }
-
-    public Set<ActorRef<Worker.Command>> getAllWorkers() {
-        return new HashSet<>(workers.keySet());
-    }
-
-    public Set<ActorRef<Worker.Command>> getIdleWorkers() {
-        return workers.entrySet()
-                .stream()
-                .filter(x -> x.getValue() == WorkerStatus.IDLE)
-                .map(Map.Entry::getKey)
-                .collect(Collectors.toSet());
     }
 
     public long calculateEndNonce() {

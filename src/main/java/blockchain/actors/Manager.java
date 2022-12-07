@@ -64,58 +64,60 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                             .nextStartNonce(0)
                             .build();
 
-                    Set<ActorRef<Worker.Command>> workers = spinUpWorkers(message.workOrder.getNumberOfSimultaneousWorkers());
-                    mining.initWorkers(workers);
+                    Map<ActorRef<Worker.Command>, WorkerStatus> workers = spinUpWorkers(message.workOrder.getNumberOfSimultaneousWorkers());
 
                     getContext().getSelf().tell(new MineNextBlockCommand());
-                    return miningRunningMessageHandler(mining);
+                    return miningRunningMessageHandler(mining, workers);
                 })
                 .build();
     }
 
-    private Receive<Command> miningRunningMessageHandler(BlockChainMining mining) {
+    private Receive<Command> miningRunningMessageHandler(BlockChainMining mining, Map<ActorRef<Worker.Command>, WorkerStatus> workers) {
         return newReceiveBuilder()
                 .onMessage(MineNextBlockCommand.class, message -> {
                     if(mining.getBlockChainSize() == mining.getNumberOfBlocksToMine()) {
                         getContext().getSelf().tell(new MiningFinishedCommand());
-                        return miningFinishedMessageHandler(mining);
+                        return miningFinishedMessageHandler(mining, workers);
                     }
 
                     mining.setCurrentBlock(Block.generateNewBlockWithRandomData(mining.getHashOfPreviousBlock()));
                     mining.setNextStartNonce(0);
                     mining.setAssignNewBlock(false);
                     getContext().getSelf().tell(new AssignWorkloadCommand());
-                    return miningRunningMessageHandler(mining);
+                    return miningRunningMessageHandler(mining, workers);
                 })
                 .onMessage(AssignWorkloadCommand.class, message -> {
-                    for(ActorRef<Worker.Command> worker : mining.getIdleWorkers()) {
-                        worker.tell(new Worker.StartMiningCommand(mining.getCurrentBlock(), mining.getNextStartNonce(), mining.calculateEndNonce(),
-                                mining.getDifficulty(), getContext().getSelf()));
-                        mining.increaseStartNonce();
-                        mining.setWorkerStatus(worker, WorkerStatus.MINING);
-                    }
-                    return miningRunningMessageHandler(mining);
+                    workers.entrySet()
+                            .stream()
+                            .filter(x -> x.getValue() == WorkerStatus.IDLE)
+                            .map(Map.Entry::getKey)
+                            .forEach(worker -> {
+                                worker.tell(buildWorkerStartMiningCommand(mining));
+                                mining.increaseStartNonce();
+                                workers.put(worker, WorkerStatus.MINING);
+                            });
+                    return miningRunningMessageHandler(mining, workers);
                 })
                 .onMessage(WorkerFinishedCommand.class, message -> {
+                    workers.put(message.getWorker(), WorkerStatus.IDLE);
+
                     if(mining.isActualBlock(message.getBlock()) && message.getResult().isPresent()) {
                         mining.addCurrentBlockToBlockChain(message.getResult().get());
                         mining.setAssignNewBlock(true);
-                        mining.setWorkerStatus(message.getWorker(), WorkerStatus.IDLE);
                         getContext().getSelf().tell(new MineNextBlockCommand());
 
                     } else {
-                        mining.setWorkerStatus(message.getWorker(), WorkerStatus.IDLE);
                         getContext().getSelf().tell(new AssignWorkloadCommand());
                     }
-                    return miningRunningMessageHandler(mining);
+                    return miningRunningMessageHandler(mining, workers);
                 })
                 .build();
     }
 
-    public Receive<Command> miningFinishedMessageHandler(BlockChainMining mining) {
+    public Receive<Command> miningFinishedMessageHandler(BlockChainMining mining, Map<ActorRef<Worker.Command>, WorkerStatus> workers) {
         return newReceiveBuilder()
                 .onMessage(MiningFinishedCommand.class, message -> {
-                    mining.getAllWorkers().forEach(x -> x.tell(new Worker.DecommissionWorkerCommand()));
+                    workers.keySet().forEach(worker -> worker.tell(new Worker.DecommissionWorkerCommand()));
                     mining.printAndValidateBlockChain();
                     long endTime = System.currentTimeMillis();
                     System.out.println("Elapsed time: " + (endTime - mining.getStartTime()) + " ms.");
@@ -124,12 +126,17 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                 .build();
     }
 
-    private Set<ActorRef<Worker.Command>> spinUpWorkers(int numberOfSimultaneousWorkers) {
-        Set<ActorRef<Worker.Command>> workers = new HashSet<>();
+    private Map<ActorRef<Worker.Command>, WorkerStatus> spinUpWorkers(int numberOfSimultaneousWorkers) {
+        Map<ActorRef<Worker.Command>, WorkerStatus> workers = new HashMap<>();
         for(int i=0; i<numberOfSimultaneousWorkers; i++) {
-            //workers.add(getContext().spawn(Worker.create(), "worker_" + UUID.randomUUID()));
-            workers.add(getContext().spawn(Worker.create(), "worker_" + i));
+            workers.put(getContext().spawn(Worker.create(), "worker_" + i), WorkerStatus.IDLE);
         }
         return workers;
     }
+
+    private Worker.Command buildWorkerStartMiningCommand(BlockChainMining mining) {
+        return new Worker.StartMiningCommand(mining.getCurrentBlock(), mining.getNextStartNonce(),
+                mining.calculateEndNonce(), mining.getDifficulty(), getContext().getSelf());
+    }
+
 }
