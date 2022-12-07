@@ -2,6 +2,8 @@ package blockchain.actors;
 
 import akka.actor.typed.ActorRef;
 import akka.actor.typed.Behavior;
+import akka.actor.typed.SupervisorStrategy;
+import akka.actor.typed.Terminated;
 import akka.actor.typed.javadsl.AbstractBehavior;
 import akka.actor.typed.javadsl.ActorContext;
 import akka.actor.typed.javadsl.Behaviors;
@@ -143,6 +145,10 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                     }
                     return miningRunningMessageHandler(mining, workers);
                 })
+                .onSignal(Terminated.class, handler -> {
+                    System.out.println("Worker terminated unexpectedly: " + handler.getRef().path());
+                    return Behaviors.same();
+                })
                 .build();
     }
 
@@ -150,6 +156,7 @@ public class Manager extends AbstractBehavior<Manager.Command> {
         return newReceiveBuilder()
                 .onMessage(MiningFinishedCommand.class, message -> {
                     workers.keySet().forEach(worker -> worker.tell(new Worker.DecommissionWorkerCommand()));
+                    getContext().getChildren().forEach(x -> getContext().stop(x));
                     this.sender.tell(mining.getBlockchain());
 
                     return Behaviors.withTimers(timers -> {
@@ -163,7 +170,10 @@ public class Manager extends AbstractBehavior<Manager.Command> {
     private Map<ActorRef<Worker.Command>, WorkerStatus> spinUpWorkers(int numberOfSimultaneousWorkers) {
         Map<ActorRef<Worker.Command>, WorkerStatus> workers = new HashMap<>();
         for(int i=0; i<numberOfSimultaneousWorkers; i++) {
-            workers.put(getContext().spawn(Worker.create(), "worker_" + i), WorkerStatus.IDLE);
+            Behavior<Worker.Command> workerBehavior = Behaviors.supervise(Worker.create()).onFailure(SupervisorStrategy.resume());
+            ActorRef<Worker.Command> worker = getContext().spawn(workerBehavior, "worker_" + i);
+            getContext().watch(worker);
+            workers.put(worker, WorkerStatus.IDLE);
         }
         return workers;
     }

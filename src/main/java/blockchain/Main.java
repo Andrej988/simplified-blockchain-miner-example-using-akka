@@ -21,7 +21,6 @@ public class Main {
                 .difficulty(6)                   //Blockchain difficulty level (how many leading zeros should be in a hash)
                 .progressReportFrequency(1)      //Progress report frequency in seconds
                 .build();
-        //miningManager.tell(new Manager.StartCommand(workOrder));
 
         CompletionStage<BlockChain> result = AskPattern.ask(miningManager, (me) -> new Manager.StartCommand(workOrder, me), Duration.ofHours(1), miningManager.scheduler());
         result.whenComplete((blockChain, failure) -> {
