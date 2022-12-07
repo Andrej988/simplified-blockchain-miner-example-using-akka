@@ -117,6 +117,7 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                     return miningRunningMessageHandler(mining, workers);
                 })
                 .onMessage(GetProgressReportCommand.class, message -> {
+                    System.out.println("Overall progress so far: Successfully mined " + mining.getBlockChainSize() + " block(s)");
                     workers.keySet().forEach(worker -> worker.tell(new Worker.ProgressReportCommand(getContext().getSelf())));
                     return Behaviors.same();
                 })
