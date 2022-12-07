@@ -13,6 +13,9 @@ import lombok.Getter;
 import lombok.ToString;
 
 import java.io.Serializable;
+import java.math.BigDecimal;
+import java.math.RoundingMode;
+import java.time.Duration;
 import java.util.*;
 
 public class Manager extends AbstractBehavior<Manager.Command> {
@@ -26,6 +29,16 @@ public class Manager extends AbstractBehavior<Manager.Command> {
 
     private static class MineNextBlockCommand implements Command {}
     private static class AssignWorkloadCommand implements Command {}
+
+    @AllArgsConstructor
+    @Getter
+    public static class WorkerProgressCommand implements Command {
+        private ActorRef<Worker.Command> worker;
+        private BigDecimal progressPercentage;
+    }
+
+    private static class GetProgressReportCommand implements Command {}
+
     private static class MiningFinishedCommand implements Command {}
 
     @AllArgsConstructor
@@ -51,6 +64,8 @@ public class Manager extends AbstractBehavior<Manager.Command> {
         return miningNotYetStartedMessageHandler();
     }
 
+    private Object TIMER_KEY;
+
     private Receive<Command> miningNotYetStartedMessageHandler() {
         return newReceiveBuilder()
                 .onMessage(StartCommand.class, message -> {
@@ -67,7 +82,10 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                     Map<ActorRef<Worker.Command>, WorkerStatus> workers = spinUpWorkers(message.workOrder.getNumberOfSimultaneousWorkers());
 
                     getContext().getSelf().tell(new MineNextBlockCommand());
-                    return miningRunningMessageHandler(mining, workers);
+                    return Behaviors.withTimers(timer -> {
+                        timer.startTimerAtFixedRate(TIMER_KEY, new GetProgressReportCommand(), Duration.ofSeconds(message.getWorkOrder().getProgressReportFrequency()));
+                        return miningRunningMessageHandler(mining, workers);
+                    });
                 })
                 .build();
     }
@@ -98,6 +116,14 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                             });
                     return miningRunningMessageHandler(mining, workers);
                 })
+                .onMessage(GetProgressReportCommand.class, message -> {
+                    workers.keySet().forEach(worker -> worker.tell(new Worker.ProgressReportCommand(getContext().getSelf())));
+                    return Behaviors.same();
+                })
+                .onMessage(WorkerProgressCommand.class, message -> {
+                    System.out.println(message.getWorker().path()+ " progress is " + message.getProgressPercentage().setScale(2, RoundingMode.HALF_UP) + "%");
+                    return Behaviors.same();
+                })
                 .onMessage(WorkerFinishedCommand.class, message -> {
                     workers.put(message.getWorker(), WorkerStatus.IDLE);
 
@@ -121,7 +147,10 @@ public class Manager extends AbstractBehavior<Manager.Command> {
                     mining.printAndValidateBlockChain();
                     long endTime = System.currentTimeMillis();
                     System.out.println("Elapsed time: " + (endTime - mining.getStartTime()) + " ms.");
-                    return Behaviors.stopped();
+                    return Behaviors.withTimers(timers -> {
+                        timers.cancelAll();
+                        return Behaviors.stopped();
+                    });
                 })
                 .build();
     }

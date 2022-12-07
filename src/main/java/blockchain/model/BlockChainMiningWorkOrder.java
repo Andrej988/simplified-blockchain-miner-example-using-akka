@@ -10,6 +10,7 @@ import lombok.Getter;
 public class BlockChainMiningWorkOrder {
     private int numberOfBlocksToMine;
     private int numberOfSimultaneousWorkers;
-    private int workloadPerWorker;
+    private long workloadPerWorker;
     private int difficulty;
+    private int progressReportFrequency;
 }

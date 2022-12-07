@@ -14,7 +14,7 @@ public class BlockChainMining {
     @Getter
     private int numberOfBlocksToMine;
 
-    private int workloadPerWorker;
+    private long workloadPerWorker;
 
     @Getter
     private int difficulty;
